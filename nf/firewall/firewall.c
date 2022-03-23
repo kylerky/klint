@@ -4,27 +4,34 @@
 #include "os/log.h"
 #include "os/time.h"
 
+#include "structs/lpm.h"
+
 #include "flow_table.h"
 
 static device_t external_device;
+static device_t management_device;
 static struct flow_table *table;
+
+static struct lpm *lpm;
 
 bool nf_init(device_t devices_count)
 {
-	if (devices_count != 2) {
+	if (devices_count != 3) {
 		return false;
 	}
 
 	time_t expiration_time;
 	size_t max_flows;
-	if (!os_config_get_device("external device", devices_count,
+	if (!os_config_get_device("external device", devices_count - 1,
 				  &external_device) ||
 	    !os_config_get_time("expiration time", &expiration_time) ||
 	    !os_config_get_size("max flows", &max_flows)) {
 		return false;
 	}
+	management_device = devices_count - 1;
 
 	table = flow_table_alloc(expiration_time, max_flows);
+	lpm = lpm_alloc();
 	return true;
 }
 
@@ -37,6 +44,14 @@ void nf_handle(struct net_packet *packet)
 	    !net_get_ipv4_header(ether_header, &ipv4_header) ||
 	    !net_get_tcpudp_header(ipv4_header, &tcpudp_header)) {
 		os_debug("Not TCP/UDP over IPv4 over Ethernet");
+		return;
+	}
+
+	if (packet->device == management_device) {
+		// "Management" interface
+		lpm_update_elem(lpm, ((uint32_t *)packet->data)[0],
+				((uint8_t *)packet->data)[4],
+				((uint16_t *)packet->data)[3]);
 		return;
 	}
 
