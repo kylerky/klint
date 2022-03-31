@@ -327,7 +327,7 @@ uint16_t lpm_long_extract_first_index(uint32_t data, uint8_t prefixlen,
   return res;
 }
 
-struct lpm* lpm_allocate()
+struct lpm* lpm_alloc()
 //@ requires *lpm_out |-> ?old_lo;
 /*@ ensures result == 0 ?
               *lpm_out |-> old_lo :
