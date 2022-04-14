@@ -3,11 +3,6 @@ Prefix = {
     "prefix": "uint32_t"
 }
 
-PrefixPair = {
-    "src": Prefix,
-    "dst": Prefix
-}
-
 RuleKey = {
     "src": "uint32_t",
     "dst": "uint32_t",
@@ -26,12 +21,9 @@ Flow = {
     'protocol': 8
 }
 
-RULE_TYPE_DROP = 0
-RULE_TYPE_ACCEPT = 1
-
 # taken from router/spec.py
 def matches(route, ip):
-    return (route.dest >> route.length) == (ip >> route.length)
+    return (route.prefix >> route.length) == (ip >> route.length)
 
 def firewall_rule_match(rules, t, src_prefix, dst_prefix, packet):
     return (
@@ -47,7 +39,7 @@ def firewall_rule_match(rules, t, src_prefix, dst_prefix, packet):
     {
        "src": src_prefix.prefix,
        "dst": dst_prefix.prefix,
-       "src_port": 0,
+       "src_port": const(RuleKey["src_port"], 0),
        "dst_port": packet.tcpudp.dst,
        "src_prefixlen": src_prefix.length,
        "dst_prefixlen": dst_prefix.length,
@@ -57,7 +49,7 @@ def firewall_rule_match(rules, t, src_prefix, dst_prefix, packet):
        "src": src_prefix.prefix,
        "dst": dst_prefix.prefix,
        "src_port": packet.tcpudp.src,
-       "dst_port": 0,
+       "dst_port": const(RuleKey["dst_port"], 0),
        "src_prefixlen": src_prefix.length,
        "dst_prefixlen": dst_prefix.length,
        "type": t
@@ -65,8 +57,8 @@ def firewall_rule_match(rules, t, src_prefix, dst_prefix, packet):
     {
        "src": src_prefix.prefix,
        "dst": dst_prefix.prefix,
-       "src_port": 0,
-       "dst_port": 0,
+       "src_port": const(RuleKey["src_port"], 0),
+       "dst_port": const(RuleKey["dst_port"], 0),
        "src_prefixlen": src_prefix.length,
        "dst_prefixlen": dst_prefix.length,
        "type": t
@@ -83,6 +75,9 @@ def accept(packet, flow, flows, transmitted_packet):
     assert transmitted_packet.device == 1 - packet.device
 
 def spec(packet, config, transmitted_packet):
+    RULE_TYPE_DROP = const(RuleKey["type"], 0)
+    RULE_TYPE_ACCEPT = const(RuleKey["type"], 1)
+
     if (packet.ipv4 is None) | (packet.tcpudp is None):
         assert transmitted_packet is None
         return
@@ -118,71 +113,30 @@ def spec(packet, config, transmitted_packet):
         accept(packet, flow, flows, transmitted_packet)
         return
 
-
-    # if exists(
-    #         PrefixPair,
-    #         lambda p: p.src.length == 32 &
-    #                   p.dst.length == 32 &
-    #                   p.src.prefix == packet.ipv4.src &
-    #                   p.dst.prefix == packet.ipv4.dst &
-    #                   firewall_rule_match(rules, RULE_TYPE_ACCEPT, p.src, p.dst, packet)
-    # ):
-        # assert transmitted_packet is None
-        # accept(packet, flow, flows, transmitted_packet)
-        # return
-
-    # if transmitted_packet is not None:
-    #     assert exists(
-    #         PrefixPair,
-    #         lambda p: p.src.length == 32 &
-    #                   p.dst.length == 32 &
-    #                   p.src.prefix == packet.ipv4.src &
-    #                   p.dst.prefix == packet.ipv4.dst &
-    #                   firewall_rule_match(rules, RULE_TYPE_ACCEPT, p.src, p.dst, packet)
-    #     )
-    # return
-
-    # if exists(
-    #         PrefixPair,
-    #         lambda p: p.src in prefixes &
-                      # p.dst in prefixes &
-                      # matches(p.src, packet.ipv4.src)
-                      # matches(p.dst, packet.ipv4.dst) &
-                      # prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.src) | (k.length <= p.src.length)) &
-                      # prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.dst) | (k.length <= p.dst.length)) &
-                      # firewall_rule_match(rules, RULE_TYPE_ACCEPT, p.src, p.dst, packet)
-    # ):
-        # pass
-        # assert transmitted_packet is not None
-        # accept(packet, flow, flows, transmitted_packet)
-        # return
-    # return
-
-    if exists(
-            PrefixPair,
-            lambda p: p.src in prefixes &
-                      p.dst in prefixes &
-                      matches(p.src, packet.ipv4.src) &
-                      matches(p.dst, packet.ipv4.dst) &
-                      prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.src) | (k.length <= p.src.length)) &
-                      prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.dst) | (k.length <= p.dst.length)) &
-                      firewall_rule_match(rules, RULE_TYPE_DROP, p.src, p.dst, packet)
+    if exists_batch(
+            (Prefix, Prefix),
+            lambda src, dst: (src in prefixes) &
+                             (dst in prefixes) &
+                             matches(src, packet.ipv4.src) &
+                             matches(dst, packet.ipv4.dst) &
+                             prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.src) | (k.length <= src.length)) &
+                             prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.dst) | (k.length <= dst.length)) &
+                             firewall_rule_match(rules, RULE_TYPE_DROP, src, dst, packet)
     ):
         assert transmitted_packet is None
         return
 
-    if exists(
-            PrefixPair,
-            lambda p: p.src in prefixes &
-                      p.dst in prefixes &
-                      matches(p.src, packet.ipv4.src) &
-                      matches(p.dst, packet.ipv4.dst) &
-                      prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.src) | (k.length <= p.src.length)) &
-                      prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.dst) | (k.length <= p.dst.length)) &
-                      firewall_rule_match(rules, RULE_TYPE_ACCEPT, p.src, p.dst, packet)
+    if exists_batch(
+            (Prefix, Prefix),
+            lambda src, dst: (src in prefixes) &
+                             (dst in prefixes) &
+                             matches(src, packet.ipv4.src) &
+                             matches(dst, packet.ipv4.dst) &
+                             prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.src) | (k.length <= src.length)) &
+                             prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.dst) | (k.length <= dst.length)) &
+                             firewall_rule_match(rules, RULE_TYPE_ACCEPT, src, dst, packet)
     ):
         accept(packet, flow, flows, transmitted_packet)
         return
 
-    # the default policy is to drop
     assert transmitted_packet is None
