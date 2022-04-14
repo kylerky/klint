@@ -70,6 +70,19 @@ def exists(type, func):
     value = __symbex__.state.BVS("exists_value", type_size(type))
     return __symbex__.state.solver.satisfiable(extra_constraints=[func(type_wrap(value, type))])
 
+# Existential quantifier, returns true iff there definitely exists a value that satisfies 'func'
+# 'func' is a lambda with one parameter returning a bool
+def exists_batch(types, func):
+    global __symbex__
+    values = (__symbex__.state.BVS("exists_value", type_size(type)) for type in types)
+    return __symbex__.state.solver.satisfiable(
+        extra_constraints=[func(*(type_wrap(value, type) for (value, type) in zip(values, types)))]
+    )
+
+def const(type, value):
+    global __symbex__
+    return __symbex__.state.BVV(value, type_size(type))
+
 
 # === Maps ===
 
