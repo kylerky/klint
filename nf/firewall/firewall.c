@@ -5,9 +5,11 @@
 #include "os/config.h"
 #include "os/log.h"
 #include "os/time.h"
+#include "os/memory.h"
 
 #include "structs/lpm.h"
 #include "structs/map.h"
+#include "structs/index_pool.h"
 
 #include "flow_table.h"
 
@@ -30,6 +32,9 @@ struct rule_key {
 };
 
 const uint8_t RULE_TYPE_DROP = 0;
+static struct rule_key *rule_keys;
+static struct index_pool *rule_handle_allocator;
+
 const uint8_t RULE_TYPE_ACCEPT = 1;
 
 bool nf_init(device_t devices_count)
@@ -39,13 +44,16 @@ bool nf_init(device_t devices_count)
 	}
 
 	time_t expiration_time;
+	time_t rule_expiration_time;
 	size_t max_flows;
 	size_t max_rules;
 	if (!os_config_get_device("external device", devices_count - 1,
 				  &external_device) ||
 	    !os_config_get_time("expiration time", &expiration_time) ||
 	    !os_config_get_size("max flows", &max_flows) ||
-	    !os_config_get_size("max rules", &max_rules)) {
+	    !os_config_get_size("max rules", &max_rules) ||
+	    !os_config_get_time("rule expiration time",
+				&rule_expiration_time)) {
 		return false;
 	}
 	management_device = devices_count - 1;
@@ -53,6 +61,10 @@ bool nf_init(device_t devices_count)
 	table = flow_table_alloc(expiration_time, max_flows);
 	prefix_matcher = lpm_alloc();
 	rules = map_alloc(sizeof(struct rule_key), max_rules);
+
+	rule_keys = os_memory_alloc(max_rules, sizeof(struct rule_key));
+	rule_handle_allocator =
+		index_pool_alloc(max_rules, rule_expiration_time);
 	return true;
 }
 
@@ -142,9 +154,35 @@ void nf_handle(struct net_packet *packet)
 
 	if (packet->device == management_device) {
 		// "Management" interface
-		lpm_update_elem(prefix_matcher, ((uint32_t *)packet->data)[0],
-				((uint8_t *)packet->data)[4],
-				((uint16_t *)packet->data)[3]);
+		char *data = &packet->data[1];
+		if (packet->data[0] == 0) {
+			lpm_update_elem(prefix_matcher, ((uint32_t *)data)[0],
+					((uint8_t *)data)[4],
+					((uint16_t *)data)[3]);
+		} else {
+			struct rule_key *key_ptr =
+				(struct rule_key *)&((uint32_t *)data)[0];
+			size_t dummy;
+			if (!map_get(rules, key_ptr, &dummy)) {
+				bool was_used;
+				size_t index;
+				if (index_pool_borrow(rule_handle_allocator,
+						      packet->time, &index,
+						      &was_used)) {
+					if (was_used) {
+						map_remove(rules,
+							   &rule_keys[index]);
+					}
+					size_t *pred_ptr =
+						(size_t *)&key_ptr[1];
+					size_t new_pred = *pred_ptr;
+
+					rule_keys[index] = *key_ptr;
+					map_set(rules, &rule_keys[index],
+						new_pred);
+				}
+			}
+		}
 		return;
 	}
 
