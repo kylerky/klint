@@ -4,13 +4,15 @@ Prefix = {
 }
 
 RuleKey = {
-    "src": "uint32_t",
-    "dst": "uint32_t",
+    "src_handle": "uint16_t",
+    "dst_handle": "uint16_t",
     "src_port": "uint16_t",
     "dst_port": "uint16_t",
-    "src_prefixlen": "uint8_t",
-    "dst_prefixlen": "uint8_t",
     "type": "uint8_t"
+}
+
+AddrHandle = {
+    "v": "uint16_t"
 }
 
 Flow = {
@@ -25,42 +27,34 @@ Flow = {
 def matches(route, ip):
     return (route.prefix >> route.length) == (ip >> route.length)
 
-def firewall_rule_match(rules, t, src_prefix, dst_prefix, packet):
+def firewall_rule_match(rules, t, src_handle, dst_handle, packet):
     return (
     {
-       "src": src_prefix.prefix,
-       "dst": dst_prefix.prefix,
+       "src_handle": src_handle,
+       "dst_handle": dst_handle,
        "src_port": packet.tcpudp.src,
        "dst_port": packet.tcpudp.dst,
-       "src_prefixlen": src_prefix.length,
-       "dst_prefixlen": dst_prefix.length,
        "type": t
     } in rules or
     {
-       "src": src_prefix.prefix,
-       "dst": dst_prefix.prefix,
+       "src_handle": src_handle,
+       "dst_handle": dst_handle,
        "src_port": const(RuleKey["src_port"], 0),
        "dst_port": packet.tcpudp.dst,
-       "src_prefixlen": src_prefix.length,
-       "dst_prefixlen": dst_prefix.length,
        "type": t
     } in rules or
     {
-       "src": src_prefix.prefix,
-       "dst": dst_prefix.prefix,
+       "src_handle": src_handle,
+       "dst_handle": dst_handle,
        "src_port": packet.tcpudp.src,
        "dst_port": const(RuleKey["dst_port"], 0),
-       "src_prefixlen": src_prefix.length,
-       "dst_prefixlen": dst_prefix.length,
        "type": t
     } in rules or
     {
-       "src": src_prefix.prefix,
-       "dst": dst_prefix.prefix,
+       "src_handle": src_handle,
+       "dst_handle": dst_handle,
        "src_port": const(RuleKey["src_port"], 0),
        "dst_port": const(RuleKey["dst_port"], 0),
-       "src_prefixlen": src_prefix.length,
-       "dst_prefixlen": dst_prefix.length,
        "type": t
     } in rules)
 
@@ -75,9 +69,6 @@ def accept(packet, flow, flows, transmitted_packet):
     assert transmitted_packet.device == 1 - packet.device
 
 def spec(packet, config, transmitted_packet):
-    RULE_TYPE_DROP = const(RuleKey["type"], 0)
-    RULE_TYPE_ACCEPT = const(RuleKey["type"], 1)
-
     if (packet.ipv4 is None) | (packet.tcpudp is None):
         assert transmitted_packet is None
         return
@@ -109,32 +100,40 @@ def spec(packet, config, transmitted_packet):
         }
 
 
-    if flow in flows:
+    if flow in flows.old:
         accept(packet, flow, flows, transmitted_packet)
         return
 
+
+    RULE_TYPE_DROP = const(RuleKey["type"], 0)
+    RULE_TYPE_ACCEPT = const(RuleKey["type"], 1)
+
     if exists_batch(
-            (Prefix, Prefix),
-            lambda src, dst: (src in prefixes) &
+            (Prefix, Prefix, AddrHandle, AddrHandle),
+            lambda src, dst, src_handle, dst_handle: (
+                             (src in prefixes) &
                              (dst in prefixes) &
                              matches(src, packet.ipv4.src) &
                              matches(dst, packet.ipv4.dst) &
-                             prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.src) | (k.length <= src.length)) &
-                             prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.dst) | (k.length <= dst.length)) &
-                             firewall_rule_match(rules, RULE_TYPE_DROP, src, dst, packet)
+                             prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.src) | (k.length > src.length) | (v == src_handle.v)) &
+                             prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.dst) | (k.length > dst.length) | (v == dst_handle.v)) &
+                             firewall_rule_match(rules, RULE_TYPE_DROP, src_handle.v, dst_handle.v, packet)
+            )
     ):
         assert transmitted_packet is None
         return
 
     if exists_batch(
-            (Prefix, Prefix),
-            lambda src, dst: (src in prefixes) &
+            (Prefix, Prefix, AddrHandle, AddrHandle),
+            lambda src, dst, src_handle, dst_handle: (
+                             (src in prefixes) &
                              (dst in prefixes) &
                              matches(src, packet.ipv4.src) &
                              matches(dst, packet.ipv4.dst) &
-                             prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.src) | (k.length <= src.length)) &
-                             prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.dst) | (k.length <= dst.length)) &
-                             firewall_rule_match(rules, RULE_TYPE_ACCEPT, src, dst, packet)
+                             prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.src) | (k.length > src.length) | (v == src_handle.v)) &
+                             prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.dst) | (k.length > dst.length) | (v == dst_handle.v)) &
+                             firewall_rule_match(rules, RULE_TYPE_ACCEPT, src_handle.v, dst_handle.v, packet)
+            )
     ):
         accept(packet, flow, flows, transmitted_packet)
         return
