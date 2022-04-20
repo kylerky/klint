@@ -51,5 +51,5 @@ def spec(packet, config, transmitted_packet):
             Route,
             lambda r: table.__contains__(r) & # TODO: why does 'r in table' fail here?
                       matches(r, packet.ipv4.dst) & # (1) Basic Match
-                      table.forall(lambda k, v: ~matches(k, packet.ipv4.dst) | (k.length < r.length) | (v == transmitted_packet.device)) # (2) Longest Match
+                      table.forall(lambda k, v: ~matches(k, packet.ipv4.dst) | (k.length > r.length) | (v == transmitted_packet.device)) # (2) Longest Match
         )
