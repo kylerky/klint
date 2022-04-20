@@ -21,20 +21,18 @@ static struct lpm *prefix_matcher;
 static struct map *rules;
 
 struct rule_key {
-	uint32_t src_prefix;
-	uint32_t dst_prefix;
+	uint16_t src_handle;
+	uint16_t dst_handle;
 	uint16_t src_port;
 	uint16_t dst_port;
-	uint8_t src_prefixlen;
-	uint8_t dst_prefixlen;
 	uint8_t type;
-	uint8_t _padding[1];
+	uint8_t _padding;
 };
 
-const uint8_t RULE_TYPE_DROP = 0;
 static struct rule_key *rule_keys;
 static struct index_pool *rule_handle_allocator;
 
+const uint8_t RULE_TYPE_DROP = 0;
 const uint8_t RULE_TYPE_ACCEPT = 1;
 
 bool nf_init(device_t devices_count)
@@ -72,29 +70,28 @@ bool check_rules_map(struct lpm *matcher, uint8_t type,
 		     struct net_ipv4_header *ipv4_header,
 		     struct net_tcpudp_header *tcpudp_header)
 {
-	uint16_t dummy;
+	uint16_t src_handle;
 	uint32_t src_prefix;
 	uint8_t src_prefixlen;
-	if (!lpm_lookup_elem(matcher, ipv4_header->src_addr, &dummy,
+	if (!lpm_lookup_elem(matcher, ipv4_header->src_addr, &src_handle,
 			     &src_prefix, &src_prefixlen)) {
 		return false;
 	}
 
+	uint16_t dst_handle;
 	uint32_t dst_prefix;
 	uint8_t dst_prefixlen;
-	if (!lpm_lookup_elem(matcher, ipv4_header->dst_addr, &dummy,
+	if (!lpm_lookup_elem(matcher, ipv4_header->dst_addr, &dst_handle,
 			     &dst_prefix, &dst_prefixlen)) {
 		return false;
 	}
 
 	// look up the matching rule if any
 	struct rule_key key = {
-		.src_prefix = src_prefix,
-		.dst_prefix = dst_prefix,
+		.src_handle = src_handle,
+		.dst_handle = dst_handle,
 		.src_port = tcpudp_header->src_port,
 		.dst_port = tcpudp_header->dst_port,
-		.src_prefixlen = src_prefixlen,
-		.dst_prefixlen = dst_prefixlen,
 		.type = type,
 	};
 
@@ -132,6 +129,7 @@ bool check_rules(struct net_ipv4_header *ipv4_header,
 			    tcpudp_header)) {
 		return false;
 	}
+
 	if (check_rules_map(prefix_matcher, RULE_TYPE_ACCEPT, ipv4_header,
 			    tcpudp_header)) {
 		return true;
@@ -162,6 +160,8 @@ void nf_handle(struct net_packet *packet)
 		} else {
 			struct rule_key *key_ptr =
 				(struct rule_key *)&((uint32_t *)data)[0];
+			key_ptr->_padding = 0;
+
 			size_t dummy;
 			if (!map_get(rules, key_ptr, &dummy)) {
 				bool was_used;
