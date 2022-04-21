@@ -207,12 +207,13 @@ void nf_handle(struct net_packet *packet)
 		});
 	}
 
-	if (!flow_table_has_external(table, packet->time, &flow) &&
-	    !check_rules(ipv4_header, tcpudp_header)) {
-		os_debug("Drop a new flow from the external");
+	if (flow_table_has_external(table, packet->time, &flow) ||
+	    check_rules(ipv4_header, tcpudp_header)) {
+		flow_table_learn_internal(table, packet->time, &flow);
+
+		net_transmit(packet, 1 - packet->device, 0);
 		return;
 	}
-	flow_table_learn_internal(table, packet->time, &flow);
 
-	net_transmit(packet, 1 - packet->device, 0);
+	os_debug("Drop a new flow from the external");
 }
