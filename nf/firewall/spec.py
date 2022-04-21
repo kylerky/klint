@@ -28,35 +28,31 @@ def matches(route, ip):
     return (route.prefix >> route.length) == (ip >> route.length)
 
 def firewall_rule_match(rules, t, src_handle, dst_handle, packet):
-    return (
-    {
+    return rules.__contains__({
        "src_handle": src_handle,
        "dst_handle": dst_handle,
        "src_port": packet.tcpudp.src,
        "dst_port": packet.tcpudp.dst,
        "type": t
-    } in rules or
-    {
+    }) | rules.__contains__({
        "src_handle": src_handle,
        "dst_handle": dst_handle,
        "src_port": const(RuleKey["src_port"], 0),
        "dst_port": packet.tcpudp.dst,
        "type": t
-    } in rules or
-    {
+    }) | rules.__contains__({
        "src_handle": src_handle,
        "dst_handle": dst_handle,
        "src_port": packet.tcpudp.src,
        "dst_port": const(RuleKey["dst_port"], 0),
        "type": t
-    } in rules or
-    {
+    }) | rules.__contains__({
        "src_handle": src_handle,
        "dst_handle": dst_handle,
        "src_port": const(RuleKey["src_port"], 0),
        "dst_port": const(RuleKey["dst_port"], 0),
        "type": t
-    } in rules)
+    })
 
 def accept(packet, flow, flows, transmitted_packet):
     if flow not in flows:
@@ -111,8 +107,8 @@ def spec(packet, config, transmitted_packet):
     if exists_batch(
             (Prefix, Prefix, AddrHandle, AddrHandle),
             lambda src, dst, src_handle, dst_handle: (
-                             (src in prefixes) &
-                             (dst in prefixes) &
+                             prefixes.__contains__(src) &
+                             prefixes.__contains__(dst) &
                              matches(src, packet.ipv4.src) &
                              matches(dst, packet.ipv4.dst) &
                              prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.src) | (k.length > src.length) | (v == src_handle.v)) &
@@ -126,8 +122,8 @@ def spec(packet, config, transmitted_packet):
     if exists_batch(
             (Prefix, Prefix, AddrHandle, AddrHandle),
             lambda src, dst, src_handle, dst_handle: (
-                             (src in prefixes) &
-                             (dst in prefixes) &
+                             prefixes.__contains__(src) &
+                             prefixes.__contains__(dst) &
                              matches(src, packet.ipv4.src) &
                              matches(dst, packet.ipv4.dst) &
                              prefixes.forall(lambda k, v: ~matches(k, packet.ipv4.src) | (k.length > src.length) | (v == src_handle.v)) &
@@ -136,6 +132,7 @@ def spec(packet, config, transmitted_packet):
             )
     ):
         accept(packet, flow, flows, transmitted_packet)
+        print("Packet accepted according to rules")
         return
 
     assert transmitted_packet is None
