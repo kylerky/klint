@@ -38,6 +38,7 @@ const uint8_t RULE_TYPE_ACCEPT = 1;
 bool nf_init(device_t devices_count)
 {
 	if (devices_count != 3) {
+		os_debug("The number of devices is not 3");
 		return false;
 	}
 
@@ -52,6 +53,7 @@ bool nf_init(device_t devices_count)
 	    !os_config_get_size("max rules", &max_rules) ||
 	    !os_config_get_time("rule expiration time",
 				&rule_expiration_time)) {
+		os_debug("NF failed to get the configurations");
 		return false;
 	}
 	management_device = devices_count - 1;
