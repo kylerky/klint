@@ -10,6 +10,7 @@ NF_EXT ?= .so
 # Get current dir, see https://stackoverflow.com/a/8080530
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
+.PHONY: build
 build:
 	@sudo modprobe msr # necessary for the Linux clock impl
 	@make -C $(NF) -f $(SELF_DIR)/../nf/Makefile.nf
@@ -17,19 +18,23 @@ build:
 	@NF=$(NF)/libnf$(NF_EXT) NF_CONFIG=$(NF)/config OS_CONFIG=$(SELF_DIR)/config make -C $(SELF_DIR)
 
 ifdef BENCHMARK_USE_DOCKER
+.PHONY: run
 run:
 	@echo 'NOTE: Using Docker to run the NF'
 	@cp $(SELF_DIR)/bin $(SELF_DIR)/docker/.
 	@sudo docker run --privileged --cpuset-cpus $(DUT_CPUS) $$(sudo docker build --quiet $(SELF_DIR)/docker)
 else
+.PHONY: run
 run:
 	@sudo $(SELF_DIR)/bin
 endif
 
+.PHONY: print-nf-name
 print-nf-name:
 	@echo bin
 
 ifeq ($(NET),dpdk)
+.PHONY: is-dpdk
 is-dpdk:
 	@# yes
 endif
