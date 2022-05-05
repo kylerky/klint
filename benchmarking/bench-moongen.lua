@@ -42,6 +42,7 @@ function configure(parser)
   parser:option("-f --flows", "Number of flows to use, defaults to 60,000"):default(60000):convert(tonumber)
   parser:flag("-x --xchange", "Exchange order of devices, in case you messed up your wiring")
   parser:flag("-m --maglev", "Handle Maglev: add heatup in reverse, so it gets heartbeats, and reverse order of devices; only for standard-single")
+  parser:flag("--firewall", "Handle the firewall: configure the firewall with default rules and generate packets accordingly")
 end
 
 -- Helper function to summarize latencies: min, max, median, stdev, 99th
@@ -252,6 +253,60 @@ function startMeasureThroughput(txQueue, rxQueue, rate, layer, duration, directi
 end
 
 
+function setupFirewall(tx)
+  local mempool = memory.createMemPool(function(buf) end)
+  local bufs = mempool:bufArray(2)
+
+  bufs:alloc(16)
+
+  local lpm_data = ffi.cast("uint8_t*", bufs[1]:getRawPacket())
+  -- Type
+  lpm_data[0] = 0
+
+  -- Prefix 192.18.0.0 (big endian (network order))
+  lpm_data[1] = 0xc6
+  lpm_data[2] = 0x12
+  lpm_data[3] = 0x0
+  lpm_data[4] = 0x0
+
+  -- Prefix length 16
+  lpm_data[5] = 0x18
+
+  -- Handle 1 (little endian)
+  lpm_data[7] = 1
+  lpm_data[8] = 0
+
+
+  local accept_table_data = ffi.cast("uint8_t*", bufs[2]:getRawPacket())
+  -- Type
+  accept_table_data[0] = 1
+
+  -- Src Handle 1 (little endian)
+  accept_table_data[1] = 1
+  accept_table_data[2] = 0
+
+  -- Dst Handle 1 (little endian)
+  accept_table_data[3] = 1
+  accept_table_data[4] = 0
+
+  -- Src Port 0 (little endian)
+  accept_table_data[5] = 0
+  accept_table_data[6] = 0
+
+  -- Dst Port 0 (little endian)
+  accept_table_data[7] = 0
+  accept_table_data[8] = 0
+
+  -- Rule Type 1
+  accept_table_data[9] = 1
+
+  -- Padding 0
+  accept_table_data[10] = 0
+
+  tx:send(bufs)
+end
+
+
 -- Heats up at the given layer
 function heatUp(queuePair, layer, flows, ignoreloss)
   io.write("[bench] Heating up...\n")
@@ -426,6 +481,7 @@ function master(args)
 
   local port0 = 0
   local port1 = 1
+  local port2 = 2
   if args.maglev then
     port0, port1 = port1, port0
   end
@@ -436,6 +492,12 @@ function master(args)
   -- Thus we need 1 TX + 1 RX queue in each device for throughput, and 1 TX in device 0 / 1 RX in device 1 for latency
   local dev0 = device.config{port = port0, rxQueues = 1, txQueues = 2}
   local dev1 = device.config{port = port1, rxQueues = 2, txQueues = 1}
+  local dev2
+  local managementTx
+
+  if args.firewall then
+    dev2 = device.config{port = port2, rxQueues = 1, txQueues = 1}
+  end
   device.waitForLinks()
 
   local queuePairs = {
@@ -470,5 +532,9 @@ function master(args)
   os.execute("rm -rf '" .. RESULTS_FOLDER_NAME .. "'")
   os.execute("mkdir -p '" .. RESULTS_FOLDER_NAME .. "/" .. RESULTS_LATENCIES_FOLDER_NAME .. "'")
 
+  if args.firewall then
+    managementTx = dev2:getTxQueue(0)
+    setupFirewall(managementTx)
+  end
   measureFunc(queuePairs, extraPair, args)
 end

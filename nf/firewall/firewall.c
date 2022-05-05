@@ -1,3 +1,4 @@
+#include "net/packet.h"
 #include <stdint.h>
 
 #include "net/skeleton.h"
@@ -14,6 +15,7 @@
 #include "flow_table.h"
 
 static device_t external_device;
+static device_t internal_device;
 static device_t management_device;
 
 static struct flow_table *table;
@@ -38,7 +40,7 @@ const uint8_t RULE_TYPE_ACCEPT = 1;
 bool nf_init(device_t devices_count)
 {
 	if (devices_count != 3) {
-		os_debug("The number of devices is not 3");
+		/* os_debug("The number of devices is not 3"); */
 		return false;
 	}
 
@@ -46,17 +48,20 @@ bool nf_init(device_t devices_count)
 	time_t rule_expiration_time;
 	size_t max_flows;
 	size_t max_rules;
-	if (!os_config_get_device("external device", devices_count - 1,
+	if (!os_config_get_device("external device", devices_count,
 				  &external_device) ||
+	    !os_config_get_device("internal device", devices_count,
+				  &internal_device) ||
+	    !os_config_get_device("management device", devices_count,
+				  &management_device) ||
 	    !os_config_get_time("expiration time", &expiration_time) ||
 	    !os_config_get_size("max flows", &max_flows) ||
 	    !os_config_get_size("max rules", &max_rules) ||
 	    !os_config_get_time("rule expiration time",
 				&rule_expiration_time)) {
-		os_debug("NF failed to get the configurations");
+		/* os_debug("NF failed to get the configurations"); */
 		return false;
 	}
-	management_device = devices_count - 1;
 
 	table = flow_table_alloc(expiration_time, max_flows);
 	prefix_matcher = lpm_alloc();
@@ -80,6 +85,11 @@ bool check_rules_map(struct lpm *matcher, uint8_t type,
 		return false;
 	}
 
+	os_debug("Src lookup");
+	os_debug_hex(src_prefix);
+	os_debug_hex(src_prefixlen);
+	os_debug_hex(src_handle);
+
 	uint16_t dst_handle;
 	uint32_t dst_prefix;
 	uint8_t dst_prefixlen;
@@ -87,6 +97,11 @@ bool check_rules_map(struct lpm *matcher, uint8_t type,
 			     &dst_prefix, &dst_prefixlen)) {
 		return false;
 	}
+
+	os_debug("Dst lookup");
+	os_debug_hex(dst_prefix);
+	os_debug_hex(dst_prefixlen);
+	os_debug_hex(dst_handle);
 
 	// look up the matching rule if any
 	struct rule_key key = {
@@ -136,12 +151,65 @@ bool check_rules(struct net_ipv4_header *ipv4_header,
 			    tcpudp_header)) {
 		return true;
 	}
+	os_debug("Drop a packet according to the default policy.");
 	// the default policy is to drop the packets that are not accepted
 	return false;
 }
 
+void nf_handle_management(struct net_packet *packet)
+{
+	char *data = &packet->data[1];
+	if (packet->data[0] == 0) {
+		os_debug("Receive an LPM update.");
+
+		os_debug_hex(((uint32_t *)data)[0]);
+		os_debug_hex(((uint8_t *)data)[4]);
+		os_debug_hex(((uint16_t *)data)[3]);
+
+		/* lpm_update_elem(prefix_matcher, ((uint32_t *)data)[0], */
+		/* 		((uint8_t *)data)[4], ((uint16_t *)data)[3]); */
+	} else {
+		os_debug("Receive a rule table update.");
+
+		struct rule_key *key_ptr =
+			(struct rule_key *)&((uint32_t *)data)[0];
+		key_ptr->_padding = 0;
+
+		size_t dummy;
+		if (!map_get(rules, key_ptr, &dummy)) {
+			bool was_used;
+			size_t index;
+			if (index_pool_borrow(rule_handle_allocator,
+					      packet->time, &index,
+					      &was_used)) {
+				if (was_used) {
+					map_remove(rules, &rule_keys[index]);
+				}
+				size_t *pred_ptr = (size_t *)&key_ptr[1];
+				size_t new_pred = *pred_ptr;
+
+				rule_keys[index] = *key_ptr;
+
+				os_debug_hex(key_ptr->src_handle);
+				os_debug_hex(key_ptr->dst_handle);
+				os_debug_hex(key_ptr->src_port);
+				os_debug_hex(key_ptr->dst_port);
+				os_debug_hex(key_ptr->type);
+
+				map_set(rules, &rule_keys[index], new_pred);
+			}
+		}
+	}
+}
+
 void nf_handle(struct net_packet *packet)
 {
+	if (packet->device == management_device) {
+		// "Management" interface
+		nf_handle_management(packet);
+		return;
+	}
+
 	struct net_ether_header *ether_header;
 	struct net_ipv4_header *ipv4_header;
 	struct net_tcpudp_header *tcpudp_header;
@@ -152,43 +220,8 @@ void nf_handle(struct net_packet *packet)
 		return;
 	}
 
-	if (packet->device == management_device) {
-		// "Management" interface
-		char *data = &packet->data[1];
-		if (packet->data[0] == 0) {
-			lpm_update_elem(prefix_matcher, ((uint32_t *)data)[0],
-					((uint8_t *)data)[4],
-					((uint16_t *)data)[3]);
-		} else {
-			struct rule_key *key_ptr =
-				(struct rule_key *)&((uint32_t *)data)[0];
-			key_ptr->_padding = 0;
-
-			size_t dummy;
-			if (!map_get(rules, key_ptr, &dummy)) {
-				bool was_used;
-				size_t index;
-				if (index_pool_borrow(rule_handle_allocator,
-						      packet->time, &index,
-						      &was_used)) {
-					if (was_used) {
-						map_remove(rules,
-							   &rule_keys[index]);
-					}
-					size_t *pred_ptr =
-						(size_t *)&key_ptr[1];
-					size_t new_pred = *pred_ptr;
-
-					rule_keys[index] = *key_ptr;
-					map_set(rules, &rule_keys[index],
-						new_pred);
-				}
-			}
-		}
-		return;
-	}
-
 	struct flow flow;
+	device_t output_device;
 	if (packet->device == external_device) {
 		flow = ((struct flow){
 			// inverted!
@@ -199,6 +232,7 @@ void nf_handle(struct net_packet *packet)
 			.protocol = ipv4_header->next_proto_id,
 
 		});
+		output_device = internal_device;
 	} else {
 		flow = ((struct flow){
 			.src_ip = ipv4_header->src_addr,
@@ -207,15 +241,18 @@ void nf_handle(struct net_packet *packet)
 			.dst_port = tcpudp_header->dst_port,
 			.protocol = ipv4_header->next_proto_id,
 		});
+		output_device = external_device;
 	}
 
 	if (flow_table_has_external(table, packet->time, &flow) ||
 	    check_rules(ipv4_header, tcpudp_header)) {
 		flow_table_learn_internal(table, packet->time, &flow);
 
-		net_transmit(packet, 1 - packet->device, 0);
+		net_transmit(packet, output_device, 0);
 		return;
 	}
 
-	os_debug("Drop a new flow from the external");
+	os_debug("Drop a new flow");
+	os_debug_hex(ipv4_header->src_addr);
+	os_debug_hex(ipv4_header->dst_addr);
 }

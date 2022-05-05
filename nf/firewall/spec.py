@@ -65,6 +65,10 @@ def accept(packet, flow, flows, transmitted_packet):
     assert transmitted_packet.device == 1 - packet.device
 
 def spec(packet, config, transmitted_packet):
+    if packet.device == config.devices_count - 1:
+        # TODO specify the behaviour here?
+         return
+
     if (packet.ipv4 is None) | (packet.tcpudp is None):
         assert transmitted_packet is None
         return
@@ -72,10 +76,6 @@ def spec(packet, config, transmitted_packet):
     flows = ExpiringSet(Flow, config["expiration time"], config["max flows"], packet.time)
     prefixes = Map(Prefix, "int16_t")
     rules = Map(RuleKey, "size_t")
-
-    if packet.device == config.devices_count - 1:
-        # TODO specify the behaviour here?
-         return
 
     flow = {}
     if packet.device == config["external device"]:
