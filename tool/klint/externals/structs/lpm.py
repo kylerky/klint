@@ -69,8 +69,7 @@ class LpmLookupElem(angr.SimProcedure):
         def matches(route):
             prefix = route[39:8]
             length = route[7:0].zero_extend(24)
-            shift = IP_LEN - length
-            return prefix.LShR(shift) == key.LShR(shift)
+            return prefix.LShR(length) == key.LShR(length)
 
         def case_none(state):
             print("!!! lpm_lookup_elem: none")

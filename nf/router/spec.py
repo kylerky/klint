@@ -4,8 +4,7 @@ Route = {
 }
 
 def matches(route, ip):
-    shift = 32 - route.length
-    return (route.dest >> shift) == (ip >> shift)
+    return (route.dest >> route.length) == (ip >> route.length)
 
 # RFC 1812 "Requirements for IP Version 4 Routers"
 def spec(packet, config, transmitted_packet):
