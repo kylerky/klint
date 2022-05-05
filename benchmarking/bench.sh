@@ -69,7 +69,7 @@ if [ ! -d "$THIS_DIR/moongen" ]; then
   fi
 fi
 
-rsync -a -q "$THIS_DIR" "$TESTER_HOST:$REMOTE_FOLDER_NAME"
+rsync -a -q "$THIS_DIR/" "$TESTER_HOST:$REMOTE_FOLDER_NAME" --exclude "results"
 if [ $? -ne 0 ]; then
   echo '[FATAL] Could not copy scripts'
   exit 1
