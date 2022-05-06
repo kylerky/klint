@@ -14,6 +14,7 @@
 #include "flow_table.h"
 
 static device_t external_device;
+static device_t internal_device;
 static device_t management_device;
 
 static struct flow_table *table;
@@ -38,7 +39,7 @@ const uint8_t RULE_TYPE_ACCEPT = 1;
 bool nf_init(device_t devices_count)
 {
 	if (devices_count != 3) {
-		os_debug("The number of devices is not 3");
+		/* os_debug("The number of devices is not 3"); */
 		return false;
 	}
 
@@ -46,17 +47,20 @@ bool nf_init(device_t devices_count)
 	time_t rule_expiration_time;
 	size_t max_flows;
 	size_t max_rules;
-	if (!os_config_get_device("external device", devices_count - 1,
+	if (!os_config_get_device("external device", devices_count,
 				  &external_device) ||
+	    !os_config_get_device("internal device", devices_count,
+				  &internal_device) ||
+	    !os_config_get_device("management device", devices_count,
+				  &management_device) ||
 	    !os_config_get_time("expiration time", &expiration_time) ||
 	    !os_config_get_size("max flows", &max_flows) ||
 	    !os_config_get_size("max rules", &max_rules) ||
 	    !os_config_get_time("rule expiration time",
 				&rule_expiration_time)) {
-		os_debug("NF failed to get the configurations");
+		/* os_debug("NF failed to get the configurations"); */
 		return false;
 	}
-	management_device = devices_count - 1;
 
 	table = flow_table_alloc(expiration_time, max_flows);
 	prefix_matcher = lpm_alloc();
@@ -195,6 +199,7 @@ void nf_handle(struct net_packet *packet)
 	}
 
 	struct flow flow;
+	device_t output_device;
 	if (packet->device == external_device) {
 		flow = ((struct flow){
 			// inverted!
@@ -205,6 +210,7 @@ void nf_handle(struct net_packet *packet)
 			.protocol = ipv4_header->next_proto_id,
 
 		});
+		output_device = internal_device;
 	} else {
 		flow = ((struct flow){
 			.src_ip = ipv4_header->src_addr,
@@ -213,15 +219,16 @@ void nf_handle(struct net_packet *packet)
 			.dst_port = tcpudp_header->dst_port,
 			.protocol = ipv4_header->next_proto_id,
 		});
+		output_device = external_device;
 	}
 
 	if (flow_table_has_external(table, packet->time, &flow) ||
 	    check_rules(ipv4_header, tcpudp_header)) {
 		flow_table_learn_internal(table, packet->time, &flow);
 
-		net_transmit(packet, 1 - packet->device, 0);
+		net_transmit(packet, output_device, 0);
 		return;
 	}
 
-	os_debug("Drop a new flow from the external");
+	os_debug("Drop a new flow");
 }
