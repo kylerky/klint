@@ -140,8 +140,50 @@ bool check_rules(struct net_ipv4_header *ipv4_header,
 	return false;
 }
 
+void nf_handle_management(struct net_packet *packet)
+{
+	char *data = &packet->data[1];
+	if (packet->data[0] == 0) {
+		os_debug("Receive an LPM update.");
+
+		lpm_update_elem(prefix_matcher, ((uint32_t *)data)[0],
+				((uint8_t *)data)[4], ((uint16_t *)data)[3]);
+	} else {
+		os_debug("Receive a rule table update.");
+
+		struct rule_key *key_ptr =
+			(struct rule_key *)&((uint32_t *)data)[0];
+		key_ptr->_padding = 0;
+
+		size_t dummy;
+		if (!map_get(rules, key_ptr, &dummy)) {
+			bool was_used;
+			size_t index;
+			if (index_pool_borrow(rule_handle_allocator,
+					      packet->time, &index,
+					      &was_used)) {
+				if (was_used) {
+					map_remove(rules, &rule_keys[index]);
+				}
+				size_t *pred_ptr = (size_t *)&key_ptr[1];
+				size_t new_pred = *pred_ptr;
+
+				rule_keys[index] = *key_ptr;
+
+				map_set(rules, &rule_keys[index], new_pred);
+			}
+		}
+	}
+}
+
 void nf_handle(struct net_packet *packet)
 {
+	if (packet->device == management_device) {
+		// "Management" interface
+		nf_handle_management(packet);
+		return;
+	}
+
 	struct net_ether_header *ether_header;
 	struct net_ipv4_header *ipv4_header;
 	struct net_tcpudp_header *tcpudp_header;
@@ -149,42 +191,6 @@ void nf_handle(struct net_packet *packet)
 	    !net_get_ipv4_header(ether_header, &ipv4_header) ||
 	    !net_get_tcpudp_header(ipv4_header, &tcpudp_header)) {
 		os_debug("Not TCP/UDP over IPv4 over Ethernet");
-		return;
-	}
-
-	if (packet->device == management_device) {
-		// "Management" interface
-		char *data = &packet->data[1];
-		if (packet->data[0] == 0) {
-			lpm_update_elem(prefix_matcher, ((uint32_t *)data)[0],
-					((uint8_t *)data)[4],
-					((uint16_t *)data)[3]);
-		} else {
-			struct rule_key *key_ptr =
-				(struct rule_key *)&((uint32_t *)data)[0];
-			key_ptr->_padding = 0;
-
-			size_t dummy;
-			if (!map_get(rules, key_ptr, &dummy)) {
-				bool was_used;
-				size_t index;
-				if (index_pool_borrow(rule_handle_allocator,
-						      packet->time, &index,
-						      &was_used)) {
-					if (was_used) {
-						map_remove(rules,
-							   &rule_keys[index]);
-					}
-					size_t *pred_ptr =
-						(size_t *)&key_ptr[1];
-					size_t new_pred = *pred_ptr;
-
-					rule_keys[index] = *key_ptr;
-					map_set(rules, &rule_keys[index],
-						new_pred);
-				}
-			}
-		}
 		return;
 	}
 
