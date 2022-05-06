@@ -54,7 +54,7 @@ def firewall_rule_match(rules, t, src_handle, dst_handle, packet):
        "type": t
     })
 
-def accept(packet, flow, flows, transmitted_packet):
+def accept(packet, flow, flows, transmitted_packet, output_device):
     if flow not in flows:
         assert flows.old.full
     else:
@@ -62,9 +62,13 @@ def accept(packet, flow, flows, transmitted_packet):
 
     assert transmitted_packet is not None
     assert transmitted_packet.data == packet.data
-    assert transmitted_packet.device == 1 - packet.device
+    assert transmitted_packet.device == output_device
 
 def spec(packet, config, transmitted_packet):
+    if packet.device == config["management device"]:
+        # TODO specify the behaviour here?
+         return
+
     if (packet.ipv4 is None) | (packet.tcpudp is None):
         assert transmitted_packet is None
         return
@@ -73,10 +77,7 @@ def spec(packet, config, transmitted_packet):
     prefixes = Map(Prefix, "int16_t")
     rules = Map(RuleKey, "size_t")
 
-    if packet.device == config.devices_count - 1:
-        # TODO specify the behaviour here?
-         return
-
+    output_device = 0
     flow = {}
     if packet.device == config["external device"]:
         flow = {
@@ -86,6 +87,7 @@ def spec(packet, config, transmitted_packet):
             'dst_port': packet.tcpudp.src,
             'protocol': packet.ipv4.protocol
         }
+        output_device = config["internal device"]
     else:
         flow = {
             'src_ip': packet.ipv4.src,
@@ -94,10 +96,11 @@ def spec(packet, config, transmitted_packet):
             'dst_port': packet.tcpudp.dst,
             'protocol': packet.ipv4.protocol
         }
+        output_device = config["external device"]
 
 
     if flow in flows.old:
-        accept(packet, flow, flows, transmitted_packet)
+        accept(packet, flow, flows, transmitted_packet, output_device)
         return
 
 
