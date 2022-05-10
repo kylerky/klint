@@ -128,22 +128,6 @@ bool check_rules_map(struct lpm *matcher, uint8_t type,
 	return false;
 }
 
-bool check_rules(struct net_ipv4_header *ipv4_header,
-		 struct net_tcpudp_header *tcpudp_header)
-{
-	if (check_rules_map(prefix_matcher, RULE_TYPE_DROP, ipv4_header,
-			    tcpudp_header)) {
-		return false;
-	}
-
-	if (check_rules_map(prefix_matcher, RULE_TYPE_ACCEPT, ipv4_header,
-			    tcpudp_header)) {
-		return true;
-	}
-	// the default policy is to drop the packets that are not accepted
-	return false;
-}
-
 void nf_handle_management(struct net_packet *packet)
 {
 	char *data = &packet->data[1];
@@ -222,13 +206,20 @@ void nf_handle(struct net_packet *packet)
 		output_device = external_device;
 	}
 
+	if (check_rules_map(prefix_matcher, RULE_TYPE_DROP, ipv4_header,
+			    tcpudp_header)) {
+		os_debug("Drop a packet due to the deny rules");
+		return;
+	}
+
 	if (flow_table_has_external(table, packet->time, &flow) ||
-	    check_rules(ipv4_header, tcpudp_header)) {
+	    check_rules_map(prefix_matcher, RULE_TYPE_ACCEPT, ipv4_header,
+			    tcpudp_header)) {
 		flow_table_learn_internal(table, packet->time, &flow);
 
 		net_transmit(packet, output_device, 0);
 		return;
 	}
 
-	os_debug("Drop a new flow");
+	os_debug("Drop a packet due to the default policy");
 }

@@ -98,18 +98,12 @@ def spec(packet, config, transmitted_packet):
         }
         output_device = config["external device"]
 
-
-    if flow in flows.old:
-        accept(packet, flow, flows, transmitted_packet, output_device)
-        return
-
-
     RULE_TYPE_DROP = const(RuleKey["type"], 0)
     RULE_TYPE_ACCEPT = const(RuleKey["type"], 1)
 
     if transmitted_packet is not None:
         print("A packet is transmitted")
-        assert exists_batch(
+        assert (flow in flows.old) | exists_batch(
             (Prefix, Prefix, AddrHandle, AddrHandle),
             lambda src, dst, src_handle, dst_handle: (
                              prefixes.__contains__(src) &
