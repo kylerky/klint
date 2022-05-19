@@ -28,6 +28,11 @@ def matches(route, ip):
     return (route.prefix >> route.length) == (ip >> route.length)
 
 def firewall_rule_match(rules, t, src_handle, dst_handle, packet):
+    assert ((packet.ipv4.protocol == 6) | (packet.ipv4.protocol == 17))
+
+    if packet.ipv4.protocol == 6:
+        t |= 2
+
     return rules.__contains__({
        "src_handle": src_handle,
        "dst_handle": dst_handle,

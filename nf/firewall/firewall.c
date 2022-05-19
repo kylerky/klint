@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include "net/skeleton.h"
+#include "net/packet.h"
 
 #include "os/config.h"
 #include "os/log.h"
@@ -35,6 +36,7 @@ static struct index_pool *rule_handle_allocator;
 
 const uint8_t RULE_TYPE_DROP = 0;
 const uint8_t RULE_TYPE_ACCEPT = 1;
+const uint8_t RULE_TYPE_IS_TCP_MASK = 2;
 
 bool nf_init(device_t devices_count)
 {
@@ -206,15 +208,18 @@ void nf_handle(struct net_packet *packet)
 		output_device = external_device;
 	}
 
-	if (check_rules_map(prefix_matcher, RULE_TYPE_DROP, ipv4_header,
+	uint8_t mask = ipv4_header->next_proto_id == IP_PROTOCOL_TCP ?
+			       RULE_TYPE_IS_TCP_MASK :
+			       0;
+	if (check_rules_map(prefix_matcher, mask | RULE_TYPE_DROP, ipv4_header,
 			    tcpudp_header)) {
 		os_debug("Drop a packet due to the deny rules");
 		return;
 	}
 
 	if (flow_table_has_external(table, packet->time, &flow) ||
-	    check_rules_map(prefix_matcher, RULE_TYPE_ACCEPT, ipv4_header,
-			    tcpudp_header)) {
+	    check_rules_map(prefix_matcher, mask | RULE_TYPE_ACCEPT,
+			    ipv4_header, tcpudp_header)) {
 		flow_table_learn_internal(table, packet->time, &flow);
 
 		net_transmit(packet, output_device, 0);
