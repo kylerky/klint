@@ -74,26 +74,9 @@ bool nf_init(device_t devices_count)
 	return true;
 }
 
-bool check_rules_map(struct lpm *matcher, uint8_t type,
-		     struct net_ipv4_header *ipv4_header,
+bool check_rules_map(uint16_t src_handle, uint16_t dst_handle, uint8_t type,
 		     struct net_tcpudp_header *tcpudp_header)
 {
-	uint16_t src_handle;
-	uint32_t src_prefix;
-	uint8_t src_prefixlen;
-	if (!lpm_lookup_elem(matcher, ipv4_header->src_addr, &src_handle,
-			     &src_prefix, &src_prefixlen)) {
-		return false;
-	}
-
-	uint16_t dst_handle;
-	uint32_t dst_prefix;
-	uint8_t dst_prefixlen;
-	if (!lpm_lookup_elem(matcher, ipv4_header->dst_addr, &dst_handle,
-			     &dst_prefix, &dst_prefixlen)) {
-		return false;
-	}
-
 	// look up the matching rule if any
 	struct rule_key key = {
 		.src_handle = src_handle,
@@ -184,6 +167,29 @@ void nf_handle(struct net_packet *packet)
 		return;
 	}
 
+	uint16_t src_handle;
+	uint32_t src_prefix;
+	uint8_t src_prefixlen;
+	uint16_t dst_handle;
+	uint32_t dst_prefix;
+	uint8_t dst_prefixlen;
+
+	bool has_handles =
+		lpm_lookup_elem(prefix_matcher, ipv4_header->src_addr,
+				&src_handle, &src_prefix, &src_prefixlen) &&
+		lpm_lookup_elem(prefix_matcher, ipv4_header->dst_addr,
+				&dst_handle, &dst_prefix, &dst_prefixlen);
+
+	uint8_t mask = ipv4_header->next_proto_id == IP_PROTOCOL_TCP ?
+			       RULE_TYPE_IS_TCP_MASK :
+			       0;
+	if (has_handles &&
+	    check_rules_map(src_handle, dst_handle, mask | RULE_TYPE_DROP,
+			    tcpudp_header)) {
+		os_debug("Drop a packet due to the deny rules");
+		return;
+	}
+
 	struct flow flow;
 	device_t output_device;
 	if (packet->device == external_device) {
@@ -208,18 +214,10 @@ void nf_handle(struct net_packet *packet)
 		output_device = external_device;
 	}
 
-	uint8_t mask = ipv4_header->next_proto_id == IP_PROTOCOL_TCP ?
-			       RULE_TYPE_IS_TCP_MASK :
-			       0;
-	if (check_rules_map(prefix_matcher, mask | RULE_TYPE_DROP, ipv4_header,
-			    tcpudp_header)) {
-		os_debug("Drop a packet due to the deny rules");
-		return;
-	}
-
 	if (flow_table_has_external(table, packet->time, &flow) ||
-	    check_rules_map(prefix_matcher, mask | RULE_TYPE_ACCEPT,
-			    ipv4_header, tcpudp_header)) {
+	    (has_handles &&
+	     check_rules_map(src_handle, dst_handle, mask | RULE_TYPE_ACCEPT,
+			     tcpudp_header))) {
 		flow_table_learn_internal(table, packet->time, &flow);
 
 		net_transmit(packet, output_device, 0);
