@@ -3,5 +3,6 @@
 { "management device", 1 },
 { "expiration time", 4000ull * 1000ull * 1000ull },
 { "max flows", 65536 },
+{ "max NAT targets", 65536 },
 { "max rules", 65536 },
 { "rule expiration time", TIME_MAX },
