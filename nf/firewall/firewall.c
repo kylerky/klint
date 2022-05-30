@@ -327,8 +327,10 @@ void nf_handle(struct net_packet *packet)
 	    (has_handles &&
 	     check_rules_map(src_handle, dst_handle, mask | RULE_TYPE_ACCEPT,
 			     tcpudp_header, &dummy_index))) {
-		maybe_snat(src_handle, dst_handle, packet->time, ipv4_header,
-			   tcpudp_header, &transmit_flags);
+		if (has_handles) {
+			maybe_snat(src_handle, dst_handle, packet->time,
+				   ipv4_header, tcpudp_header, &transmit_flags);
+		}
 
 		device_t output_device = packet->device == external_device ?
 						 internal_device :
