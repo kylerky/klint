@@ -149,6 +149,12 @@ void nf_handle_management(struct net_packet *packet)
 		key_ptr->_padding = 0;
 
 		size_t dummy;
+		size_t *value_ptr = (size_t *)&key_ptr[1];
+		size_t new_value = *value_ptr;
+		if (new_value >= max_nat_targets) {
+			break;
+		}
+
 		if (!map_get(rules, key_ptr, &dummy)) {
 			bool was_used;
 			size_t index;
@@ -158,17 +164,15 @@ void nf_handle_management(struct net_packet *packet)
 				if (was_used) {
 					map_remove(rules, &rule_keys[index]);
 				}
-				size_t *pred_ptr = (size_t *)&key_ptr[1];
-				size_t new_pred = *pred_ptr;
 
 				rule_keys[index] = *key_ptr;
 
-				map_set(rules, &rule_keys[index], new_pred);
+				map_set(rules, &rule_keys[index], new_value);
 			}
 		}
 	} break;
 	case 2: {
-		os_debug("Receive an SNAT target update.");
+		os_debug("Receive an NAT target update.");
 
 		uint64_t *index_ptr = (uint64_t *)&data[0];
 		uint64_t index = *index_ptr;
