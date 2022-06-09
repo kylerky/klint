@@ -32,19 +32,16 @@ struct rule_key {
 	uint16_t dst_handle;
 	uint16_t src_port;
 	uint16_t dst_port;
-	uint8_t type;
-	uint8_t _padding;
 };
 
 static struct rule_key *rule_keys;
 static struct index_pool *rule_handle_allocator;
 
-const uint8_t RULE_TYPE_ACCEPT = 1;
 const uint8_t ACCEPT_CONDITION_UDP_MASK = 1;
 const uint8_t ACCEPT_CONDITION_TCP_MASK = 2;
 const uint8_t ACCEPT_CONDITION_MASK_ACCEPT_SHIFT = 2;
 
-const uint8_t RULE_TYPE_SNAT = 4;
+const uint8_t ACCEPT_CONDITION_SNAT_SHIFT = 4;
 
 struct nat_target {
 	uint32_t ip;
@@ -95,7 +92,7 @@ bool nf_init(device_t devices_count)
 	return true;
 }
 
-bool check_rules_map(uint16_t src_handle, uint16_t dst_handle, uint8_t type,
+bool check_rules_map(uint16_t src_handle, uint16_t dst_handle,
 		     struct net_tcpudp_header *tcpudp_header, size_t *value)
 {
 	// look up the matching rule if any
@@ -104,7 +101,7 @@ bool check_rules_map(uint16_t src_handle, uint16_t dst_handle, uint8_t type,
 		.dst_handle = dst_handle,
 		.src_port = tcpudp_header->src_port,
 		.dst_port = tcpudp_header->dst_port,
-		.type = type,
+
 	};
 
 	if (map_get(rules, &key, value)) {
@@ -148,8 +145,6 @@ void nf_handle_management(struct net_packet *packet)
 		os_debug("Receive a rule table update.");
 
 		struct rule_key *key_ptr = (struct rule_key *)&data[0];
-		key_ptr->_padding = 0;
-
 		size_t dummy;
 		size_t *value_ptr = (size_t *)&key_ptr[1];
 		size_t new_value = *value_ptr;
@@ -192,14 +187,12 @@ void nf_handle_management(struct net_packet *packet)
 	}
 }
 
-void maybe_snat(uint16_t src_handle, uint16_t dst_handle, time_t time,
+void maybe_snat(size_t target_index, time_t time,
 		struct net_ipv4_header *ipv4_header,
 		struct net_tcpudp_header *tcpudp_header,
 		enum net_transmit_flags *flags)
 {
-	size_t target_index;
-	if (!check_rules_map(src_handle, dst_handle, RULE_TYPE_SNAT,
-			     tcpudp_header, &target_index)) {
+	if (target_index == 0) {
 		struct flow flow = {
 			.src_ip = ipv4_header->src_addr,
 			.dst_ip = ipv4_header->dst_addr,
@@ -317,8 +310,8 @@ void nf_handle(struct net_packet *packet)
 
 	size_t accept_condition = 0;
 	if (has_handles) {
-		check_rules_map(src_handle, dst_handle, RULE_TYPE_ACCEPT,
-				tcpudp_header, &accept_condition);
+		check_rules_map(src_handle, dst_handle, tcpudp_header,
+				&accept_condition);
 	}
 	if ((accept_condition & accept_condition_mask) != 0) {
 		os_debug("Drop a packet due to the deny rules");
@@ -337,10 +330,10 @@ void nf_handle(struct net_packet *packet)
 	if (flow_table_has(flows, packet->time, &flow) ||
 	    flow_table_has_reverse(flows, packet->time, &flow) ||
 	    ((accept_condition & accept_condition_mask) != 0)) {
-		if (has_handles) {
-			maybe_snat(src_handle, dst_handle, packet->time,
-				   ipv4_header, tcpudp_header, &transmit_flags);
-		}
+		size_t target_index =
+			accept_condition >> ACCEPT_CONDITION_SNAT_SHIFT;
+		maybe_snat(target_index, packet->time, ipv4_header,
+			   tcpudp_header, &transmit_flags);
 
 		device_t output_device = packet->device == external_device ?
 						 internal_device :

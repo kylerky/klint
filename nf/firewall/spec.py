@@ -8,7 +8,6 @@ RuleKey = {
     "dst_handle": "uint16_t",
     "src_port": "uint16_t",
     "dst_port": "uint16_t",
-    "type": "uint8_t"
 }
 
 AddrHandle = {
@@ -27,33 +26,29 @@ Flow = {
 def matches(route, ip):
     return (route.prefix >> route.length) == (ip >> route.length)
 
-def firewall_rule_lookup(rules, t, src_handle, dst_handle, flow):
+def firewall_rule_lookup(rules, src_handle, dst_handle, flow):
     assert ((flow['protocol'] == 6) | (flow['protocol'] == 17))
 
     keys = [{
        "src_handle": src_handle,
        "dst_handle": dst_handle,
        "src_port": flow['src_port'],
-       "dst_port": flow['dst_port'],
-       "type": t
+       "dst_port": flow['dst_port']
     }, {
        "src_handle": src_handle,
        "dst_handle": dst_handle,
        "src_port": const(RuleKey["src_port"], 0),
-       "dst_port": flow['dst_port'],
-       "type": t
+       "dst_port": flow['dst_port']
     }, {
        "src_handle": src_handle,
        "dst_handle": dst_handle,
        "src_port": flow['src_port'],
-       "dst_port": const(RuleKey["dst_port"], 0),
-       "type": t
+       "dst_port": const(RuleKey["dst_port"], 0)
     }, {
        "src_handle": src_handle,
        "dst_handle": dst_handle,
        "src_port": const(RuleKey["src_port"], 0),
-       "dst_port": const(RuleKey["dst_port"], 0),
-       "type": t
+       "dst_port": const(RuleKey["dst_port"], 0)
     }]
 
     for k in keys:
@@ -61,8 +56,8 @@ def firewall_rule_lookup(rules, t, src_handle, dst_handle, flow):
             return (True, rules[k])
     return (False, None)
 
-def firewall_rule_lookup_satisfy(rules, t, src_handle, dst_handle, flow, predicate):
-    result = firewall_rule_lookup((rules, t, src_handle, dst_handle, flow)
+def firewall_rule_lookup_satisfy(rules, src_handle, dst_handle, flow, predicate):
+    result = firewall_rule_lookup((rules, src_handle, dst_handle, flow)
     return result[0] & predicate(result[1])
 
 def accept(packet, flow, flows, transmitted_packet, output_device):
@@ -107,7 +102,6 @@ def spec(packet, config, transmitted_packet):
         flow['dst_ip'] = original_snat_flow.src_ip
         flow['dst_port'] = original_snat_flow.src_port
 
-    RULE_TYPE_ACCEPT = const(RuleKey["type"], 1)
     RULE_VALUE_DROP_MASK = const("size_t", 2) if flow['protocol'] == 6 else const("size_t", 1)
 
     # the deny rules have higher priorities over the flow table
@@ -123,7 +117,6 @@ def spec(packet, config, transmitted_packet):
                              prefixes.forall(lambda k, v: ~matches(k, flow['dst_ip']) | (k.length > dst.length) | (v == dst_handle.v)) &
                              firewall_rule_lookup_satisfy(
                                  rules,
-                                 RULE_TYPE_ACCEPT,
                                  src_handle.v,
                                  dst_handle.v,
                                  flow,
@@ -144,7 +137,6 @@ def spec(packet, config, transmitted_packet):
                              prefixes.forall(lambda k, v: ~matches(k, flow['dst_ip']) | (k.length > dst.length) | (v == dst_handle.v)) &
                              firewall_rule_lookup_satisfy(
                                  rules,
-                                 RULE_TYPE_ACCEPT,
                                  src_handle.v,
                                  dst_handle.v,
                                  flow,
