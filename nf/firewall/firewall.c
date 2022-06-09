@@ -39,9 +39,11 @@ struct rule_key {
 static struct rule_key *rule_keys;
 static struct index_pool *rule_handle_allocator;
 
-const uint8_t RULE_TYPE_DROP = 0;
 const uint8_t RULE_TYPE_ACCEPT = 1;
-const uint8_t RULE_TYPE_IS_TCP_MASK = 2;
+const uint8_t ACCEPT_CONDITION_UDP_MASK = 1;
+const uint8_t ACCEPT_CONDITION_TCP_MASK = 2;
+const uint8_t ACCEPT_CONDITION_MASK_ACCEPT_SHIFT = 2;
+
 const uint8_t RULE_TYPE_SNAT = 4;
 
 struct nat_target {
@@ -308,13 +310,17 @@ void nf_handle(struct net_packet *packet)
 		lpm_lookup_elem(prefix_matcher, ipv4_header->dst_addr,
 				&dst_handle, &dst_prefix, &dst_prefixlen);
 
-	uint8_t mask = ipv4_header->next_proto_id == IP_PROTOCOL_TCP ?
-			       RULE_TYPE_IS_TCP_MASK :
-			       0;
-	size_t dummy_index;
-	if (has_handles &&
-	    check_rules_map(src_handle, dst_handle, mask | RULE_TYPE_DROP,
-			    tcpudp_header, &dummy_index)) {
+	size_t accept_condition_mask =
+		ipv4_header->next_proto_id == IP_PROTOCOL_TCP ?
+			ACCEPT_CONDITION_TCP_MASK :
+			ACCEPT_CONDITION_UDP_MASK;
+
+	size_t accept_condition = 0;
+	if (has_handles) {
+		check_rules_map(src_handle, dst_handle, RULE_TYPE_ACCEPT,
+				tcpudp_header, &accept_condition);
+	}
+	if ((accept_condition & accept_condition_mask) != 0) {
 		os_debug("Drop a packet due to the deny rules");
 		return;
 	}
@@ -326,11 +332,11 @@ void nf_handle(struct net_packet *packet)
 		.dst_port = tcpudp_header->dst_port,
 		.protocol = ipv4_header->next_proto_id,
 	};
+
+	accept_condition_mask <<= ACCEPT_CONDITION_MASK_ACCEPT_SHIFT;
 	if (flow_table_has(flows, packet->time, &flow) ||
 	    flow_table_has_reverse(flows, packet->time, &flow) ||
-	    (has_handles &&
-	     check_rules_map(src_handle, dst_handle, mask | RULE_TYPE_ACCEPT,
-			     tcpudp_header, &dummy_index))) {
+	    ((accept_condition & accept_condition_mask) != 0)) {
 		if (has_handles) {
 			maybe_snat(src_handle, dst_handle, packet->time,
 				   ipv4_header, tcpudp_header, &transmit_flags);
