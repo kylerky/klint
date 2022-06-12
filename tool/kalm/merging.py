@@ -217,7 +217,40 @@ class MergingExplorationTechnique(angr.exploration_techniques.ExplorationTechniq
 
         # Sort all deferred states by instruction pointer
         def raiser(): raise Exception("Cannot handle symbolic instruction pointers")
-        simgr.stashes[self.deferred_stash].sort(reverse=True, key=lambda s: s.regs.rip.args[0] if not s.regs.rip.symbolic else raiser())
+        deferred_stash = simgr.stashes[self.deferred_stash]
+        deferred_stash.sort(reverse=True, key=lambda s: s.regs.rip.args[0] if not s.regs.rip.symbolic else raiser())
+        # Find the states with rip at the data structure libraries
+        map_get_found = False
+        lib_state_start = 0
+        lib_state_end = 0
+        # TODO: Use the following with Python 3.10
+        # lib_state_end = bisect.bisect_right(deferred_stash, -0x700000, key=lambda s: -s.addr)
+        # for i, s in enumerate(deferred_stash):
+        #     if s.addr < 0x800000:
+        #         lib_state_start = i
+        #         break
+        # for i, s in enumerate(deferred_stash):
+        #     if s.addr < 0x700030:
+        #         lib_state_end = i
+        #         break
+        for i, s in enumerate(deferred_stash):
+            prev_descr = s.history.recent_description
+            if not map_get_found:
+                if s.addr >= 0x700030 and \
+                   any(desc.startswith("<SimProcedure") and desc.split(' ')[1] == "map_get" for desc in list(s.history.descriptions)[-5:]):
+                    map_get_found = True
+                    lib_state_start = i
+            else:
+                if not(s.addr >= 0x70030 and \
+                       any(desc.startswith("<SimProcedure") and desc.split(' ')[1] == "map_get" for desc in list(s.history.descriptions)[-5:])):
+                    lib_state_end = i
+                    break
+        else:
+            if map_get_found:
+                lib_state_end = len(deferred_stash)
+
+        # Hack: Prioritise those states with addresses higher than 0x700000
+        simgr.stashes[self.deferred_stash] = deferred_stash[:lib_state_start] + deferred_stash[lib_state_end:] + deferred_stash[lib_state_start:lib_state_end]
 
         # Find the states with the lowest instruction pointer
         lowest = []
